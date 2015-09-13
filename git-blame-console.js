@@ -4,12 +4,6 @@ var path = require('path');
 var readline = require('readline');
 var args = require('minimist')(process.argv.slice(2));
 
-function GitFile(hash, pathToRepositry) {
-  this.hash = hash;
-  this.path = pathToRepositry;
-  this.lines = [];
-}
-
 function repositry(dir) {
   for (;; dir = path.dirname(dir)) {
     try {
@@ -24,6 +18,12 @@ function repositry(dir) {
   }
 }
 
+function GitFile(pathRelativeToRepositry, hash) {
+  this.path = pathRelativeToRepositry;
+  this.hash = hash;
+  this.lines = [];
+}
+
 GitFile.prototype.blame = function () {
   var me = this;
   return new Promise(function (onFullfilled, onRejected) {
@@ -32,7 +32,7 @@ GitFile.prototype.blame = function () {
 }
 
 GitFile.prototype.blameCore = function (onFullfilled, onRejected) {
-  var args = ['blame', '-fCCC', this.hash, '--', this.path];
+  var args = ['blame', '-fCCC', this.hash ? this.hash : 'HEAD', '--', this.path];
   console.log(args);
   var blame = spawn('git', args);
   var pattern = /^([0-9a-f]+) (\S+) +\((\S+) +(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \+\d{4}) +(\d+)\) (.*)/;
@@ -67,13 +67,15 @@ GitFile.prototype.blameCore = function (onFullfilled, onRejected) {
 }
 
 function GitBlameConsole(filename) {
+  this.stack = [];
+
   var fullPath = path.resolve(filename);
   var root = repositry(path.dirname(fullPath));
   process.chdir(root);
-  this.setFile(new GitFile('HEAD', path.relative(root, fullPath)));
+  this.setFile(new GitFile(path.relative(root, fullPath)));
 
   this.ui = readline.createInterface(process.stdin, process.stdout);
-  this.ui.setPrompt('>');
+  this.ui.setPrompt('Line number, Enter for next, Back>');
   var me = this;
   this.ui.on('line', function (line) {
     me.onCommand(line);
@@ -84,19 +86,24 @@ GitBlameConsole.prototype.onCommand = function (line) {
   var num = parseInt(line);
   if (!isNaN(num)) {
     num--;
-    if (num >= this.firstLineIndex && num <= this.lineIndex) {
+    if (num >= this.firstLineIndex && num <= this.nextLineIndex) {
       var line = this.file.lines[num];
       console.log(line);
-      this.setFile(new GitFile(line.hash + '^', line.path));
+      this.setFile(new GitFile(line.path, line.hash + '^'));
       return;
     }
-    this.lineIndex = num;
-    this.show();
+    this.show(num);
     return;
   }
   switch (line) {
   case '':
     this.show();
+    return;
+  case 'b':
+    this.back();
+    return;
+  case 'q':
+    this.ui.close();
     return;
   default:
     console.log('Unknown command "' + line + '"');
@@ -106,19 +113,20 @@ GitBlameConsole.prototype.onCommand = function (line) {
 }
 
 GitBlameConsole.prototype.setFile = function (file) {
+  if (this.file)
+    this.stack.push([this.file, this.firstLineIndex]);
   this.file = file;
-  this.lineIndex = 0;
-  this.firstLineIndex = 0;
   var me = this;
   this.file.blame().then(function () {
     console.log(me.file.lines.length + ' lines\n');
-    me.show();
+    me.show(0);
   });
 }
 
-GitBlameConsole.prototype.show = function () {
+GitBlameConsole.prototype.show = function (index) {
   var file = this.file;
-  var index = this.lineIndex;
+  if (index === undefined)
+    index = this.nextLineIndex;
   this.firstLineIndex = index;
   var lim = Math.min(file.lines.length, index + process.stdout.rows - 1);
   for (; index < lim; index++) {
@@ -127,11 +135,26 @@ GitBlameConsole.prototype.show = function () {
     if (!line)
       text += '???';
     else
-      text += line.dateTime + ' ' + line.author + ' ' + line.text;
+      text += line.hash + ' ' + line.dateTime + ' ' + line.author + ' ' + line.text;
     text = text.substring(0, process.stdout.columns);
     this.ui.output.write(text + '\n');
   }
-  this.lineIndex = index;
+  this.nextLineIndex = index;
+  this.ui.prompt();
+}
+
+GitBlameConsole.prototype.back = function () {
+  if (this.firstLineIndex) {
+    this.show(Math.max(0, this.firstLineIndex - process.stdout.rows + 1));
+    return;
+  }
+  var popped = this.stack.pop();
+  if (popped) {
+    this.file = popped[0];
+    this.show(popped[1]);
+    return;
+  }
+  this.ui.output.write('No more to back\n');
   this.ui.prompt();
 }
 
