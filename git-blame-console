@@ -35,7 +35,7 @@ GitFile.prototype.blameCore = function (onFullfilled, onRejected) {
   var args = ['blame', '-fCCC', this.hash ? this.hash : 'HEAD', '--', this.path];
   console.log(args);
   var blame = spawn('git', args);
-  var pattern = /^([0-9a-f]+) (\S+) +\((\S+) +(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \+\d{4}) +(\d+)\) (.*)/;
+  var pattern = /^([0-9a-f]+) (\S+) +\((.+) +(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \+\d{4}) +(\d+)\) (.*)/;
   var me = this;
   readline.createInterface({
     input: blame.stdout,
