@@ -22,16 +22,37 @@ function GitFile(pathRelativeToRepositry, hash) {
   this.path = pathRelativeToRepositry;
   this.hash = hash;
   this.lines = [];
+  this._isFilled = false;
 }
 
-GitFile.prototype.blame = function () {
+GitFile.prototype.blame = function (start, limit) {
+  console.log('blame(' + start + ', ' + limit + ')');
   var me = this;
-  return new Promise(function (onFullfilled, onRejected) {
-    me._blame(onFullfilled, onRejected);
+  if (this._isFilled) {
+    return new Promise(function (onFullfilled, onRejected) {
+      onFullfilled(me);
+    });
+  }
+  var isRan = this.lines.length > 0;
+  if (isRan) {
+    var line = this.lines[limit - 1];
+    if (line && !isFunction(line)) {
+      return new Promise(function (onFullfilled, onRejected) {
+        onFullfilled(me);
+      });
+    }
+  }
+  var promise = new Promise(function (onFullfilled, onRejected) {
+    me.lines[limit - 1] = function () {
+      onFullfilled(me);
+    };
   });
+  if (!isRan)
+    this.runBlame();
+  return promise;
 }
 
-GitFile.prototype._blame = function (onFullfilled, onRejected) {
+GitFile.prototype.runBlame = function () {
   var args = ['blame', '-fCCC', this.hash ? this.hash : 'HEAD', '--', this.path];
   console.log('git ' + args.join(' '));
   var blame = spawn('git', args);
@@ -43,14 +64,18 @@ GitFile.prototype._blame = function (onFullfilled, onRejected) {
     var match = pattern.exec(line);
     if (match) {
       var lineNumber = parseInt(match[5]);
-      me.setLine(lineNumber - 1, {
+      var index = lineNumber - 1;
+      var onFullfilled = me.lines[index];
+      me.lines[index] = {
         number: lineNumber,
         hash: match[1],
         path: match[2],
         author: match[3],
         dateTime: match[4],
         text: match[6],
-      });
+      };
+      if (onFullfilled)
+        onFullfilled(me);
       return;
     }
     console.log('Unkonwn line ignored: ' + line);
@@ -60,28 +85,36 @@ GitFile.prototype._blame = function (onFullfilled, onRejected) {
   })
   blame.on('close', function (code) {
     console.log('close: ' + code);
-    if (code)
-      onRejected(code);
-    else
-      onFullfilled();
+    me.onRunBlameCompleted();
   });
 }
 
-GitFile.prototype.setLine = function (index, line) {
-  this.lines[index] = line;
+GitFile.prototype.onRunBlameCompleted = function () {
+  for (var index = this.lines.length - 1;; index--) {
+    var line = this.lines[index];
+    if (line && !isFunction(line))
+      break;
+  }
+  index++;
+  var trimmed = this.lines.splice(index);
+  for (var onFullfilled of trimmed) {
+    if (onFullfilled)
+      onFullfilled(this);
+  }
+  this._isFilled = true;
 }
 
 function GitBlameConsole(filename) {
   this.stack = [];
+  this.ui = readline.createInterface(process.stdin, process.stdout);
+  this.ui.setPrompt('Line number, Enter for next, Back>');
+  this.resetPage();
 
   var fullPath = path.resolve(filename);
   var root = repositry(path.dirname(fullPath));
   process.chdir(root);
   this.setFile(new GitFile(path.relative(root, fullPath)));
 
-  this.ui = readline.createInterface(process.stdin, process.stdout);
-  this.ui.setPrompt('Line number, Enter for next, Back>');
-  this.resetPage();
   var me = this;
   this.ui.on('line', function (line) {
     me.onCommand(line);
@@ -141,32 +174,32 @@ GitBlameConsole.prototype.setFile = function (file) {
   if (this.file)
     this.stack.push([this.file, this.firstLineIndex]);
   this.file = file;
-  var me = this;
-  this.file.blame().then(function () {
-    console.log(me.file.lines.length + ' lines\n');
-    me.show(0);
-  });
+  this.show(0);
 }
 
 GitBlameConsole.prototype.show = function (index) {
+  var me = this;
   var file = this.file;
   if (index === undefined)
     index = this.nextLineIndex;
   this.firstLineIndex = index;
-  var lim = Math.min(file.lines.length, index + this.availableLineCountInPage() - 1);
-  for (; index < lim; index++) {
-    var text = (index + 1) + ': ';
-    var line = this.file.lines[index];
-    if (line) {
-      text += line.hash + ' ' + line.dateTime.substring(0, 10) + ' ' + line.author;
+  var end = index + this.availableLineCountInPage() - 1;
+  file.blame(index, end).then(function () {
+    end = Math.min(file.lines.length, end);
+    for (; index < end; index++) {
+      var line = file.lines[index];
+      if (!line) {
+        this.writeLine('???');
+        continue;
+      }
+      var text = line.number + ': ' + line.hash + ' ' + line.dateTime.substring(0, 10) + ' ' + line.author;
       text = text.padOrTrimRight(50);
       text += ' ' + line.text;
-    } else
-      text += '???';
-    this.writeLine(text);
-  }
-  this.nextLineIndex = index;
-  this.prompt();
+      me.writeLine(text);
+    }
+    me.nextLineIndex = index;
+    me.prompt();
+  });
 }
 
 GitBlameConsole.prototype.back = function () {
@@ -184,6 +217,7 @@ GitBlameConsole.prototype.back = function () {
   this.prompt();
 }
 
+function isFunction(obj) { return obj instanceof Function; }
 String.prototype.padRight = function(l,c) {return this.length<l ? this+Array(l-this.length+1).join(c||" ") : this;};
 String.prototype.padOrTrimRight = function(l,c) {return this.length<l ? this+Array(l-this.length+1).join(c||" ") : this.substring(0,l);};
 
