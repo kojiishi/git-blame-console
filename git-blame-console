@@ -1,8 +1,8 @@
+#!/usr/bin/env node
 var spawn = require('child_process').spawn;
 var fs = require('fs');
 var path = require('path');
 var readline = require('readline');
-var args = require('minimist')(process.argv.slice(2));
 
 function repositry(dir) {
   for (;; dir = path.dirname(dir)) {
@@ -158,4 +158,4 @@ GitBlameConsole.prototype.back = function () {
   this.ui.prompt();
 }
 
-new GitBlameConsole(args._[0]);
+new GitBlameConsole(process.argv[2]);
