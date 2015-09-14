@@ -27,11 +27,11 @@ function GitFile(pathRelativeToRepositry, hash) {
 GitFile.prototype.blame = function () {
   var me = this;
   return new Promise(function (onFullfilled, onRejected) {
-    me.blameCore(onFullfilled, onRejected);
+    me._blame(onFullfilled, onRejected);
   });
 }
 
-GitFile.prototype.blameCore = function (onFullfilled, onRejected) {
+GitFile.prototype._blame = function (onFullfilled, onRejected) {
   var args = ['blame', '-fCCC', this.hash ? this.hash : 'HEAD', '--', this.path];
   console.log('git ' + args.join(' '));
   var blame = spawn('git', args);
@@ -42,14 +42,15 @@ GitFile.prototype.blameCore = function (onFullfilled, onRejected) {
   }).on('line', function (line) {
     var match = pattern.exec(line);
     if (match) {
-      var lineNumber = parseInt(match[5]) - 1;
-      me.lines[lineNumber] = {
+      var lineNumber = parseInt(match[5]);
+      me.setLine(lineNumber - 1, {
+        number: lineNumber,
         hash: match[1],
         path: match[2],
         author: match[3],
         dateTime: match[4],
         text: match[6],
-      };
+      });
       return;
     }
     console.log('Unkonwn line ignored: ' + line);
@@ -66,6 +67,10 @@ GitFile.prototype.blameCore = function (onFullfilled, onRejected) {
   });
 }
 
+GitFile.prototype.setLine = function (index, line) {
+  this.lines[index] = line;
+}
+
 function GitBlameConsole(filename) {
   this.stack = [];
 
@@ -76,10 +81,30 @@ function GitBlameConsole(filename) {
 
   this.ui = readline.createInterface(process.stdin, process.stdout);
   this.ui.setPrompt('Line number, Enter for next, Back>');
+  this.resetPage();
   var me = this;
   this.ui.on('line', function (line) {
     me.onCommand(line);
   });
+}
+
+GitBlameConsole.prototype.resetPage = function () {
+  this.lineCountInPage = 0;
+}
+
+GitBlameConsole.prototype.availableLineCountInPage = function () {
+  return process.stdout.rows - this.lineCountInPage;
+}
+
+GitBlameConsole.prototype.writeLine = function (text) {
+  text = text.substring(0, process.stdout.columns);
+  this.ui.output.write(text + '\n');
+  this.lineCountInPage++;
+}
+
+GitBlameConsole.prototype.prompt = function () {
+  this.resetPage();
+  this.ui.prompt();
 }
 
 GitBlameConsole.prototype.onCommand = function (line) {
@@ -109,7 +134,7 @@ GitBlameConsole.prototype.onCommand = function (line) {
     console.log('Unknown command "' + line + '"');
     break;
   }
-  this.ui.prompt();
+  this.prompt();
 }
 
 GitBlameConsole.prototype.setFile = function (file) {
@@ -128,7 +153,7 @@ GitBlameConsole.prototype.show = function (index) {
   if (index === undefined)
     index = this.nextLineIndex;
   this.firstLineIndex = index;
-  var lim = Math.min(file.lines.length, index + process.stdout.rows - 1);
+  var lim = Math.min(file.lines.length, index + this.availableLineCountInPage() - 1);
   for (; index < lim; index++) {
     var text = (index + 1) + ': ';
     var line = this.file.lines[index];
@@ -138,11 +163,10 @@ GitBlameConsole.prototype.show = function (index) {
       text += ' ' + line.text;
     } else
       text += '???';
-    text = text.substring(0, process.stdout.columns);
-    this.ui.output.write(text + '\n');
+    this.writeLine(text);
   }
   this.nextLineIndex = index;
-  this.ui.prompt();
+  this.prompt();
 }
 
 GitBlameConsole.prototype.back = function () {
@@ -157,7 +181,7 @@ GitBlameConsole.prototype.back = function () {
     return;
   }
   this.ui.output.write('No more to back\n');
-  this.ui.prompt();
+  this.prompt();
 }
 
 String.prototype.padRight = function(l,c) {return this.length<l ? this+Array(l-this.length+1).join(c||" ") : this;};
