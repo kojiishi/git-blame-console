@@ -132,10 +132,12 @@ GitBlameConsole.prototype.show = function (index) {
   for (; index < lim; index++) {
     var text = (index + 1) + ': ';
     var line = this.file.lines[index];
-    if (!line)
+    if (line) {
+      text += line.hash + ' ' + line.dateTime.substring(0, 10) + ' ' + line.author;
+      text = text.padOrTrimRight(50);
+      text += ' ' + line.text;
+    } else
       text += '???';
-    else
-      text += line.hash + ' ' + line.dateTime + ' ' + line.author + ' ' + line.text;
     text = text.substring(0, process.stdout.columns);
     this.ui.output.write(text + '\n');
   }
@@ -157,5 +159,8 @@ GitBlameConsole.prototype.back = function () {
   this.ui.output.write('No more to back\n');
   this.ui.prompt();
 }
+
+String.prototype.padRight = function(l,c) {return this.length<l ? this+Array(l-this.length+1).join(c||" ") : this;};
+String.prototype.padOrTrimRight = function(l,c) {return this.length<l ? this+Array(l-this.length+1).join(c||" ") : this.substring(0,l);};
 
 new GitBlameConsole(process.argv[2]);
