@@ -23,31 +23,25 @@ function GitFile(pathRelativeToRepositry, hash) {
   this.hash = hash;
   this.lines = [];
   this._isFilled = false;
+  this._promises = [];
 }
 
 GitFile.prototype.blame = function (start, limit) {
   console.log('blame(' + start + ', ' + limit + ')');
   var me = this;
-  if (this._isFilled) {
+  if (this._isFilled || limit <= this.lines.length) {
     return new Promise(function (onFullfilled, onRejected) {
       onFullfilled(me);
     });
   }
-  var isRan = this.lines.length > 0;
-  if (isRan) {
-    var line = this.lines[limit - 1];
-    if (line && !isFunction(line)) {
-      return new Promise(function (onFullfilled, onRejected) {
-        onFullfilled(me);
-      });
-    }
-  }
   var promise = new Promise(function (onFullfilled, onRejected) {
-    me.lines[limit - 1] = function () {
-      onFullfilled(me);
-    };
+    me._promises.push({
+      index: limit - 1,
+      onFullfilled: onFullfilled,
+      onRejected: onRejected,
+    });
   });
-  if (!isRan)
+  if (!this.lines.length)
     this.runBlame();
   return promise;
 }
@@ -65,7 +59,6 @@ GitFile.prototype.runBlame = function () {
     if (match) {
       var lineNumber = parseInt(match[5]);
       var index = lineNumber - 1;
-      var onFullfilled = me.lines[index];
       me.lines[index] = {
         number: lineNumber,
         hash: match[1],
@@ -74,8 +67,8 @@ GitFile.prototype.runBlame = function () {
         dateTime: match[4],
         text: match[6],
       };
-      if (onFullfilled)
-        onFullfilled(me);
+      while (me._promises.length && me._promises[0].index <= index)
+        me._promises.shift().onFullfilled(me);
       return;
     }
     console.log('Unkonwn line ignored: ' + line);
@@ -90,17 +83,8 @@ GitFile.prototype.runBlame = function () {
 }
 
 GitFile.prototype.onRunBlameCompleted = function () {
-  for (var index = this.lines.length - 1;; index--) {
-    var line = this.lines[index];
-    if (line && !isFunction(line))
-      break;
-  }
-  index++;
-  var trimmed = this.lines.splice(index);
-  for (var onFullfilled of trimmed) {
-    if (onFullfilled)
-      onFullfilled(this);
-  }
+  while (this._promises.length)
+    this._promises.shift().onFullfilled(this);
   this._isFilled = true;
 }
 
