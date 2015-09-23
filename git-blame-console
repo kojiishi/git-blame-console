@@ -27,7 +27,7 @@ function GitFile(pathRelativeToRepositry, hash) {
 }
 
 GitFile.prototype.blame = function (start, limit) {
-  console.log('blame(' + start + ', ' + limit + ')');
+  this.log('blame(' + start + ', ' + limit + ')');
   var me = this;
   if (this._isFilled || limit <= this.lines.length) {
     return new Promise(function (onFullfilled, onRejected) {
@@ -48,7 +48,7 @@ GitFile.prototype.blame = function (start, limit) {
 
 GitFile.prototype.runBlame = function () {
   var args = ['blame', '-fCCC', this.hash ? this.hash : 'HEAD', '--', this.path];
-  console.log('git ' + args.join(' '));
+  this.log('git ' + args.join(' '));
   var blame = spawn('git', args);
   var pattern = /^([0-9a-f]+) (\S+) +\((.+) +(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \+\d{4}) +(\d+)\) (.*)/;
   var me = this;
@@ -71,21 +71,24 @@ GitFile.prototype.runBlame = function () {
         me._promises.shift().onFullfilled(me);
       return;
     }
-    console.log('Unkonwn line ignored: ' + line);
+    me.log('Unkonwn line ignored: ' + line);
   });
   blame.stderr.on('data', function (data) {
-    console.log('stderr: ' + data.toString());
+    me.log('stderr: ' + data.toString());
   })
   blame.on('close', function (code) {
-    console.log('close: ' + code);
-    me.onRunBlameCompleted();
+    me.onRunBlameCompleted(code);
   });
 }
 
-GitFile.prototype.onRunBlameCompleted = function () {
+GitFile.prototype.onRunBlameCompleted = function (code) {
   while (this._promises.length)
     this._promises.shift().onFullfilled(this);
   this._isFilled = true;
+}
+
+GitFile.prototype.log = function (text) {
+  this.ui.writeLine(text);
 }
 
 function GitBlameConsole(filename) {
@@ -157,6 +160,7 @@ GitBlameConsole.prototype.onCommand = function (line) {
 GitBlameConsole.prototype.setFile = function (file) {
   if (this.file)
     this.stack.push([this.file, this.firstLineIndex]);
+  file.ui = this;
   this.file = file;
   this.show(0);
 }
@@ -167,7 +171,7 @@ GitBlameConsole.prototype.show = function (index) {
   if (index === undefined)
     index = this.nextLineIndex;
   this.firstLineIndex = index;
-  var end = index + this.availableLineCountInPage() - 1;
+  var end = index + this.availableLineCountInPage() - 2;
   file.blame(index, end).then(function () {
     end = Math.min(file.lines.length, end);
     for (; index < end; index++) {
